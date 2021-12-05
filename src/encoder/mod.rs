@@ -288,6 +288,7 @@ pub struct ImageEncoder<'a, W: 'a + Write + Seek, C: ColorType, K: TiffKind> {
     strip_offsets: Vec<K::OffsetType>,
     strip_byte_count: Vec<K::OffsetType>,
     dropped: bool,
+    compression: Option<tags::CompressionMethod>,
     _phantom: ::std::marker::PhantomData<C>,
 }
 
@@ -304,7 +305,6 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
 
         encoder.write_tag(Tag::ImageWidth, width)?;
         encoder.write_tag(Tag::ImageLength, height)?;
-        encoder.write_tag(Tag::Compression, tags::CompressionMethod::None.to_u16())?;
 
         encoder.write_tag(Tag::BitsPerSample, <T>::BITS_PER_SAMPLE)?;
         let sample_format: Vec<_> = <T>::SAMPLE_FORMAT.iter().map(|s| s.to_u16()).collect();
@@ -332,6 +332,7 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
             strip_offsets: Vec::new(),
             strip_byte_count: Vec::new(),
             dropped: false,
+            compression: None,
             _phantom: ::std::marker::PhantomData,
         })
     }
@@ -354,7 +355,6 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
     where
         [T::Inner]: TiffValue,
     {
-        // TODO: Compression
         let samples = self.next_strip_sample_count();
         if u64::try_from(value.len())? != samples {
             return Err(io::Error::new(
@@ -364,7 +364,22 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
             .into());
         }
 
-        let offset = self.encoder.write_data(value)?;
+        let offset = match self.compression {
+            Some(tags::CompressionMethod::None) | None => {
+                // The user did not specify an compression. Write the the default one.
+                if self.compression.is_none() {
+                    self.compression(tags::CompressionMethod::None)?;
+                }
+
+                // Do not compress
+                self.encoder.write_data(value)
+            }
+            Some(_) => {
+                // Implement different compression algorithms
+                unimplemented!("Compression not implemented")
+            }
+        }?;
+
         self.strip_offsets.push(K::convert_offset(offset)?);
         self.strip_byte_count.push(value.bytes().try_into()?);
 
@@ -399,6 +414,26 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
             idx += sample_count;
         }
         self.finish()?;
+        Ok(())
+    }
+
+    /// Set the compression used to encode strips.
+    ///
+    /// You can call this function only once. This function needs to be called before any calls to `write_data` or
+    /// `write_strip` and will return an error otherwise.
+    pub fn compression(&mut self, compression: tags::CompressionMethod) -> TiffResult<()> {
+        if let Some(_) = self.compression {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Cannot change compression after it was set",
+            )
+            .into());
+        };
+
+        // ToDo: Check if compression is supported.
+        self.encoder
+            .write_tag(Tag::Compression, tags::CompressionMethod::None.to_u16())?;
+        self.compression = Some(compression);
         Ok(())
     }
 
