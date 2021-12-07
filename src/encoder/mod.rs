@@ -22,6 +22,10 @@ mod writer;
 use self::colortype::*;
 use self::writer::*;
 
+extern crate flate2;
+use flate2::write::*;
+use flate2::Compression;
+
 /// Encoder for Tiff and BigTiff files.
 ///
 /// With this type you can get a `DirectoryEncoder` or a `ImageEncoder`
@@ -376,6 +380,16 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
                 let offset = self.encoder.write_data(value)?;
                 (offset, byte_count)
             }
+            Some(tags::CompressionMethod::Deflate) => {
+                // Deflate Compression
+                let mut compressor = ZlibEncoder::new(Vec::new(), Compression::best());
+                compressor.write(&mut value.serialize()).unwrap();
+                let compressed_imagedata: &[u8] = &compressor.finish().unwrap();
+
+                let byte_count = compressed_imagedata.bytes().try_into()?;
+                let offset = self.encoder.write_data(compressed_imagedata)?;
+                (offset, byte_count)
+            }
             Some(_) => {
                 // Implement different compression algorithms
                 unimplemented!("Compression not implemented")
@@ -434,7 +448,7 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
 
         // ToDo: Check if compression is supported.
         self.encoder
-            .write_tag(Tag::Compression, tags::CompressionMethod::None.to_u16())?;
+            .write_tag(Tag::Compression, compression.to_u16())?;
         self.compression = Some(compression);
         Ok(())
     }

@@ -2,7 +2,7 @@ extern crate tiff;
 
 use tiff::decoder::{ifd, Decoder, DecodingResult};
 use tiff::encoder::{colortype, Ifd, Ifd8, SRational, TiffEncoder};
-use tiff::tags::Tag;
+use tiff::tags::{CompressionMethod, Tag};
 use tiff::ColorType;
 
 use std::fs::File;
@@ -11,20 +11,23 @@ use std::path::PathBuf;
 
 #[test]
 fn read_write() {
-    let file = File::open("./tests/images/test.tiff").unwrap();
-    let mut file_destination = File::create("./tests/images/test_mod.tiff").unwrap();
+    {
+        let file = File::open("./tests/images/test.tiff").unwrap();
+        let mut file_destination = File::create("./tests/images/test_mod.tiff").unwrap();
 
-    //read image
-    let mut decoder = Decoder::new(file).unwrap();
-    assert_eq!(decoder.colortype().unwrap(), ColorType::RGB(8));
-    assert_eq!(decoder.dimensions().unwrap(), (1920, 1440));
-    if let DecodingResult::U8(img_res) = decoder.read_image().unwrap() {
-        // write image
-        let mut tiff = TiffEncoder::new(&mut file_destination).unwrap();
-        let image = tiff.new_image::<colortype::RGB8>(1920, 1440).unwrap();
-        image.write_data(&img_res).unwrap();
-    } else {
-        panic!("Wrong data type");
+        //read image
+        let mut decoder = Decoder::new(file).unwrap();
+        assert_eq!(decoder.colortype().unwrap(), ColorType::RGB(8));
+        assert_eq!(decoder.dimensions().unwrap(), (1920, 1440));
+        if let DecodingResult::U8(img_res) = decoder.read_image().unwrap() {
+            // write image
+            let mut tiff = TiffEncoder::new(&mut file_destination).unwrap();
+            let mut image = tiff.new_image::<colortype::RGB8>(1920, 1440).unwrap();
+            image.compression(CompressionMethod::Deflate);
+            image.write_data(&img_res).unwrap();
+        } else {
+            panic!("Wrong data type");
+        }
     }
 }
 
