@@ -10,6 +10,25 @@ use std::io::{Cursor, Seek, SeekFrom};
 use std::path::PathBuf;
 
 #[test]
+fn read_write() {
+    let file = File::open("./tests/images/test.tiff").unwrap();
+    let mut file_destination = File::create("./tests/images/test_mod.tiff").unwrap();
+
+    //read image
+    let mut decoder = Decoder::new(file).unwrap();
+    assert_eq!(decoder.colortype().unwrap(), ColorType::RGB(8));
+    assert_eq!(decoder.dimensions().unwrap(), (1920, 1440));
+    if let DecodingResult::U8(img_res) = decoder.read_image().unwrap() {
+        // write image
+        let mut tiff = TiffEncoder::new(&mut file_destination).unwrap();
+        let image = tiff.new_image::<colortype::RGB8>(1920, 1440).unwrap();
+        image.write_data(&img_res).unwrap();
+    } else {
+        panic!("Wrong data type");
+    }
+}
+
+#[test]
 fn encode_decode() {
     let mut image_data = Vec::new();
     for x in 0..100 {
