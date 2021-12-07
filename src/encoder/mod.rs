@@ -364,7 +364,7 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
             .into());
         }
 
-        let offset = match self.compression {
+        let (offset, count) = match self.compression {
             Some(tags::CompressionMethod::None) | None => {
                 // The user did not specify an compression. Write the the default one.
                 if self.compression.is_none() {
@@ -372,16 +372,18 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
                 }
 
                 // Do not compress
-                self.encoder.write_data(value)
+                let byte_count = value.bytes().try_into()?;
+                let offset = self.encoder.write_data(value)?;
+                (offset, byte_count)
             }
             Some(_) => {
                 // Implement different compression algorithms
                 unimplemented!("Compression not implemented")
             }
-        }?;
+        };
 
         self.strip_offsets.push(K::convert_offset(offset)?);
-        self.strip_byte_count.push(value.bytes().try_into()?);
+        self.strip_byte_count.push(count);
 
         self.strip_idx += 1;
         Ok(())
