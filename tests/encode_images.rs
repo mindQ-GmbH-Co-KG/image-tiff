@@ -23,7 +23,7 @@ fn read_write() {
             // write image
             let mut tiff = TiffEncoder::new(&mut file_destination).unwrap();
             let mut image = tiff.new_image::<colortype::RGB8>(1920, 1440).unwrap();
-            image.compression(CompressionMethod::Deflate);
+            let _ignored = image.compression(CompressionMethod::Deflate);
             image.write_data(&img_res).unwrap();
         } else {
             panic!("Wrong data type");

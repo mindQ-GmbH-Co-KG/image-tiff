@@ -4,7 +4,7 @@ use std::{
     cmp,
     collections::BTreeMap,
     convert::{TryFrom, TryInto},
-    io::{self, Seek, Write},
+    io::{self, BufReader, Cursor, Read, Seek, Write},
     marker::PhantomData,
     mem,
     num::TryFromIntError,
@@ -23,7 +23,7 @@ use self::colortype::*;
 use self::writer::*;
 
 extern crate flate2;
-use flate2::write::*;
+use flate2::bufread::ZlibEncoder;
 use flate2::Compression;
 
 /// Encoder for Tiff and BigTiff files.
@@ -309,6 +309,7 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
 
         encoder.write_tag(Tag::ImageWidth, width)?;
         encoder.write_tag(Tag::ImageLength, height)?;
+        encoder.write_tag(Tag::Compression, tags::CompressionMethod::None.to_u16())?;
 
         encoder.write_tag(Tag::BitsPerSample, <T>::BITS_PER_SAMPLE)?;
         let sample_format: Vec<_> = <T>::SAMPLE_FORMAT.iter().map(|s| s.to_u16()).collect();
@@ -382,12 +383,16 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
             }
             Some(tags::CompressionMethod::Deflate) => {
                 // Deflate Compression
-                let mut compressor = ZlibEncoder::new(Vec::new(), Compression::best());
-                compressor.write(&mut value.serialize()).unwrap();
-                let compressed_imagedata: &[u8] = &compressor.finish().unwrap();
+                let mut compressed_imagedata = Vec::new();
+                let uncompressed_imagedata = Cursor::new(value.serialize());
+                let buf_reader = BufReader::new(uncompressed_imagedata);
+                let mut compressor = ZlibEncoder::new(buf_reader, Compression::best());
+                let byte_count = compressor
+                    .read_to_end(&mut compressed_imagedata)
+                    .unwrap()
+                    .try_into()?;
 
-                let byte_count = compressed_imagedata.bytes().try_into()?;
-                let offset = self.encoder.write_data(compressed_imagedata)?;
+                let offset = self.encoder.write_data(&*compressed_imagedata)?;
                 (offset, byte_count)
             }
             Some(_) => {
