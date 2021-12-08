@@ -371,11 +371,6 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
 
         let (offset, count) = match self.compression {
             Some(tags::CompressionMethod::None) | None => {
-                // The user did not specify an compression. Write the the default one.
-                if self.compression.is_none() {
-                    self.compression(tags::CompressionMethod::None)?;
-                }
-
                 // Do not compress
                 let byte_count = value.bytes().try_into()?;
                 let offset = self.encoder.write_data(value)?;
