@@ -32,6 +32,48 @@ fn read_write() {
 }
 
 #[test]
+fn encode_decode_with_deflate() {
+    let mut img_file = Cursor::new(Vec::new());
+    let data1: Vec<u16> = [1, 2, 3, 4, 5, 6, 7, 8, 9].to_vec();
+    let data2: Vec<u8> = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1].to_vec();
+
+    // encode with deflate
+    {
+        // first create a multipage image with 2 images
+        let mut encoder = TiffEncoder::new(&mut img_file).unwrap();
+
+        // write first grayscale image (3x3 16-bit)
+        let mut image1 = encoder.new_image::<colortype::Gray16>(3, 3).unwrap();
+        let _ignored = image1.compression(CompressionMethod::Deflate);
+        image1.write_data(&data1[..]).unwrap();
+
+        // write second grayscale image (3x5 8-bit)
+        let mut image2 = encoder.new_image::<colortype::Gray8>(3, 5).unwrap();
+        let _ignored = image2.compression(CompressionMethod::Deflate);
+        image2.write_data(&data2[..]).unwrap();
+    }
+    img_file.seek(SeekFrom::Start(0)).unwrap();
+
+    // decode with deflate
+    {
+        let mut decoder = Decoder::new(&mut img_file).unwrap();
+
+        if let DecodingResult::U16(image1) = decoder.read_image().unwrap() {
+            assert_eq!(data1, image1);
+        } else {
+            panic!("Wrong data type");
+        }
+
+        decoder.next_image().unwrap();
+        if let DecodingResult::U8(image2) = decoder.read_image().unwrap() {
+            assert_eq!(data2, image2);
+        } else {
+            panic!("Wrong data type");
+        }
+    }
+}
+
+#[test]
 fn encode_decode() {
     let mut image_data = Vec::new();
     for x in 0..100 {
