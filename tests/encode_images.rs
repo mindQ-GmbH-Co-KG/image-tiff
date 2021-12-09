@@ -10,45 +10,39 @@ use std::io::{Cursor, Seek, SeekFrom};
 use std::path::PathBuf;
 
 #[test]
-fn read_write() {
-    {
-        let file = File::open("./tests/images/test.tiff").unwrap();
-        let mut file_destination = File::create("./tests/images/test_mod.tiff").unwrap();
-
-        //read image
-        let mut decoder = Decoder::new(file).unwrap();
-        assert_eq!(decoder.colortype().unwrap(), ColorType::RGB(8));
-        assert_eq!(decoder.dimensions().unwrap(), (1920, 1440));
-        if let DecodingResult::U8(img_res) = decoder.read_image().unwrap() {
-            // write image
-            let mut tiff = TiffEncoder::new(&mut file_destination).unwrap();
-            let mut image = tiff.new_image::<colortype::RGB8>(1920, 1440).unwrap();
-            let _ignored = image.compression(CompressionMethod::Deflate);
-            image.write_data(&img_res).unwrap();
-        } else {
-            panic!("Wrong data type");
-        }
-    }
-}
-
-#[test]
 fn encode_decode_with_deflate() {
     let mut img_file = Cursor::new(Vec::new());
-    let data1: Vec<u16> = [1, 2, 3, 4, 5, 6, 7, 8, 9].to_vec();
-    let data2: Vec<u8> = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1].to_vec();
+    let mut data1: Vec<u16> = Vec::with_capacity(100 * 70 * 3);
+    let mut data2: Vec<u8> = Vec::with_capacity(210 * 100 * 3);
+
+    for x in 0..100 {
+        for y in 0..70u16 {
+            let val = x + y;
+            data1.push(val);
+            data1.push(val);
+            data1.push(val);
+        }
+    }
+
+    for x in 0..210 {
+        for y in 0..100u16 {
+            let val = (x + y) % 255;
+            data2.push(val as u8);
+        }
+    }
 
     // encode with deflate
     {
         // first create a multipage image with 2 images
         let mut encoder = TiffEncoder::new(&mut img_file).unwrap();
 
-        // write first grayscale image (3x3 16-bit)
-        let mut image1 = encoder.new_image::<colortype::Gray16>(3, 3).unwrap();
+        // write first colored image (100x70 16-bit)
+        let mut image1 = encoder.new_image::<colortype::RGB16>(100, 70).unwrap();
         let _ignored = image1.compression(CompressionMethod::Deflate);
         image1.write_data(&data1[..]).unwrap();
 
-        // write second grayscale image (3x5 8-bit)
-        let mut image2 = encoder.new_image::<colortype::Gray8>(3, 5).unwrap();
+        // write second grayscale image (210x100 8-bit)
+        let mut image2 = encoder.new_image::<colortype::Gray8>(210, 100).unwrap();
         let _ignored = image2.compression(CompressionMethod::Deflate);
         image2.write_data(&data2[..]).unwrap();
     }
@@ -71,6 +65,11 @@ fn encode_decode_with_deflate() {
             panic!("Wrong data type");
         }
     }
+
+    // encoded images as tiff smaller than raw images
+    let tiff_len = img_file.get_ref().len();
+    let image_len = data1.len() * 2 + data2.len();
+    assert_eq!(tiff_len < image_len, true);
 }
 
 #[test]
