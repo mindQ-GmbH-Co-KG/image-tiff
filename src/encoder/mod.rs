@@ -4,7 +4,7 @@ use std::{
     cmp,
     collections::BTreeMap,
     convert::{TryFrom, TryInto},
-    io::{self, BufReader, Cursor, Read, Seek, Write},
+    io::{self, Seek, Write},
     marker::PhantomData,
     mem,
     num::TryFromIntError,
@@ -16,15 +16,13 @@ use crate::{
 };
 
 pub mod colortype;
+mod compression;
 mod tiff_value;
 mod writer;
 
 use self::colortype::*;
 use self::writer::*;
-
-extern crate flate2;
-use flate2::bufread::ZlibEncoder;
-use flate2::Compression;
+use compression::*;
 
 /// Encoder for Tiff and BigTiff files.
 ///
@@ -369,35 +367,22 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
             .into());
         }
 
-        let (offset, count) = match self.compression {
-            Some(tags::CompressionMethod::None) | None => {
-                // Do not compress
-                let byte_count = value.bytes().try_into()?;
-                let offset = self.encoder.write_data(value)?;
-                (offset, byte_count)
-            }
-            Some(tags::CompressionMethod::Deflate) => {
-                // Deflate Compression
-                let mut compressed_imagedata = Vec::new();
-                let uncompressed_imagedata = Cursor::new(value.serialize());
-                let buf_reader = BufReader::new(uncompressed_imagedata);
-                let mut compressor = ZlibEncoder::new(buf_reader, Compression::best());
-                let byte_count = compressor
-                    .read_to_end(&mut compressed_imagedata)
-                    .unwrap()
-                    .try_into()?;
-
-                let offset = self.encoder.write_data(&*compressed_imagedata)?;
-                (offset, byte_count)
-            }
+        let compressor: &dyn Compressor = match self.compression {
+            Some(tags::CompressionMethod::None) | None => &NoneCompressor {},
+            Some(tags::CompressionMethod::LZW) => &LZWCompressor {},
+            Some(tags::CompressionMethod::Deflate) => &DeflateCompressor {},
             Some(_) => {
                 // Implement different compression algorithms
                 unimplemented!("Compression not implemented")
             }
         };
 
+        let compressed_imagedata = compressor.compress(value.serialize())?;
+        let byte_count = compressed_imagedata.len().try_into()?;
+        let offset = self.encoder.write_data(&*compressed_imagedata)?;
+
         self.strip_offsets.push(K::convert_offset(offset)?);
-        self.strip_byte_count.push(count);
+        self.strip_byte_count.push(byte_count);
 
         self.strip_idx += 1;
         Ok(())
@@ -446,7 +431,15 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
             .into());
         };
 
-        // ToDo: Check if compression is supported.
+        // Check if compression is supported.
+        if !compression::supported(compression) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "CompressionMethod is not supported.",
+            )
+            .into());
+        };
+
         self.encoder
             .write_tag(Tag::Compression, compression.to_u16())?;
         self.compression = Some(compression);

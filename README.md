@@ -32,7 +32,7 @@ This table lists photometric interpretations and sample formats which are suppor
 | | Decoding | Encoding |
 |-|-|-|
 | None | ✓ | ✓ |
-| LZW | ✓ | |
+| LZW | ✓ | ✓ |
 | Deflate | ✓ | ✓ |
 | PackBits | ✓ | |
 

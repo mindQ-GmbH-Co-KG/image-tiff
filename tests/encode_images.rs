@@ -9,25 +9,27 @@ use std::fs::File;
 use std::io::{Cursor, Seek, SeekFrom};
 use std::path::PathBuf;
 
-#[test]
-fn encode_decode_with_deflate() {
+fn encode_decode_with_compression(compression: CompressionMethod) {
     let mut img_file = Cursor::new(Vec::new());
     let mut data1: Vec<u16> = Vec::with_capacity(100 * 70 * 3);
     let mut data2: Vec<u8> = Vec::with_capacity(210 * 100 * 3);
 
-    for x in 0..100 {
-        for y in 0..70u16 {
-            let val = x + y;
-            data1.push(val);
-            data1.push(val);
-            data1.push(val);
+    // create test data
+    {
+        for x in 0..100 {
+            for y in 0..70u16 {
+                let val = x + y;
+                data1.push(val);
+                data1.push(val);
+                data1.push(val);
+            }
         }
-    }
 
-    for x in 0..210 {
-        for y in 0..100u16 {
-            let val = (x + y) % 255;
-            data2.push(val as u8);
+        for x in 0..210 {
+            for y in 0..100u16 {
+                let val = (x + y) % 255;
+                data2.push(val as u8);
+            }
         }
     }
 
@@ -38,12 +40,12 @@ fn encode_decode_with_deflate() {
 
         // write first colored image (100x70 16-bit)
         let mut image1 = encoder.new_image::<colortype::RGB16>(100, 70).unwrap();
-        let _ignored = image1.compression(CompressionMethod::Deflate);
+        image1.compression(compression).unwrap();
         image1.write_data(&data1[..]).unwrap();
 
         // write second grayscale image (210x100 8-bit)
         let mut image2 = encoder.new_image::<colortype::Gray8>(210, 100).unwrap();
-        let _ignored = image2.compression(CompressionMethod::Deflate);
+        image2.compression(compression).unwrap();
         image2.write_data(&data2[..]).unwrap();
     }
     img_file.seek(SeekFrom::Start(0)).unwrap();
@@ -65,11 +67,16 @@ fn encode_decode_with_deflate() {
             panic!("Wrong data type");
         }
     }
+}
 
-    // encoded images as tiff smaller than raw images
-    let tiff_len = img_file.get_ref().len();
-    let image_len = data1.len() * 2 + data2.len();
-    assert_eq!(tiff_len < image_len, true);
+#[test]
+fn encode_decode_with_deflate() {
+    encode_decode_with_compression(CompressionMethod::Deflate);
+}
+
+#[test]
+fn encode_decode_with_lzw() {
+    encode_decode_with_compression(CompressionMethod::LZW);
 }
 
 #[test]
