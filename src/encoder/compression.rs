@@ -59,6 +59,20 @@ mod test {
     }
 
     #[test]
+    fn test_suported_compressionmethods() {
+        assert_eq!(supported(CompressionMethod::None), true);
+        assert_eq!(supported(CompressionMethod::Huffman), false);
+        assert_eq!(supported(CompressionMethod::Fax3), false);
+        assert_eq!(supported(CompressionMethod::Fax4), false);
+        assert_eq!(supported(CompressionMethod::LZW), true);
+        assert_eq!(supported(CompressionMethod::JPEG), false);
+        assert_eq!(supported(CompressionMethod::ModernJPEG), false);
+        assert_eq!(supported(CompressionMethod::Deflate), true);
+        assert_eq!(supported(CompressionMethod::OldDeflate), false);
+        assert_eq!(supported(CompressionMethod::PackBits), false);
+    }
+
+    #[test]
     fn test_no_compression() {
         let compressor = NoneCompressor {};
         let compressed_data = compressor.compress(get_test_data()).unwrap();

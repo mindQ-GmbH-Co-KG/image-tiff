@@ -73,11 +73,58 @@ fn encode_decode_with_compression(compression: CompressionMethod) {
 }
 
 #[test]
-fn encode_decode_with_deflate() {
-    encode_decode_with_compression(CompressionMethod::Deflate);
+fn encode_decode_without_compression() {
+    encode_decode_with_compression(CompressionMethod::None);
+}
+
+#[test]
+#[should_panic(expected = "CompressionMethod is not supported.")]
+fn encode_decode_with_huffman() {
+    encode_decode_with_compression(CompressionMethod::Huffman);
+}
+
+#[test]
+#[should_panic(expected = "CompressionMethod is not supported.")]
+fn encode_decode_with_fax3() {
+    encode_decode_with_compression(CompressionMethod::Fax3);
+}
+
+#[test]
+#[should_panic(expected = "CompressionMethod is not supported.")]
+fn encode_decode_with_fax4() {
+    encode_decode_with_compression(CompressionMethod::Fax4);
 }
 
 #[test]
 fn encode_decode_with_lzw() {
     encode_decode_with_compression(CompressionMethod::LZW);
+}
+
+#[test]
+#[should_panic(expected = "CompressionMethod is not supported.")]
+fn encode_decode_with_jpeg() {
+    encode_decode_with_compression(CompressionMethod::JPEG);
+}
+
+#[test]
+#[should_panic(expected = "CompressionMethod is not supported.")]
+fn encode_decode_with_modernjpeg() {
+    encode_decode_with_compression(CompressionMethod::ModernJPEG);
+}
+
+#[test]
+fn encode_decode_with_deflate() {
+    encode_decode_with_compression(CompressionMethod::Deflate);
+}
+
+#[test]
+#[should_panic(expected = "CompressionMethod is not supported.")]
+fn encode_decode_with_olddeflate() {
+    encode_decode_with_compression(CompressionMethod::OldDeflate);
+}
+
+#[test]
+#[should_panic(expected = "CompressionMethod is not supported.")]
+fn encode_decode_with_packbits() {
+    encode_decode_with_compression(CompressionMethod::PackBits);
 }
