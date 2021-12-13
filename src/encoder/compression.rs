@@ -1,12 +1,12 @@
-use crate::{error::TiffResult, tags::CompressionMethod};
-
-extern crate flate2;
-use flate2::write::ZlibEncoder;
-use flate2::Compression;
 use std::io::prelude::*;
+
+use crate::{error::TiffResult, tags::CompressionMethod};
 
 extern crate weezl;
 use weezl::encode::Encoder as LZWEncoder;
+
+extern crate flate2;
+use flate2::{write::ZlibEncoder, Compression};
 
 /// Indicates whether a compression method is supported for encoding image data.
 pub fn supported(compression: CompressionMethod) -> bool {
@@ -30,6 +30,14 @@ impl Compressor for NoneCompressor {
     }
 }
 
+pub struct LZWCompressor {}
+
+impl Compressor for LZWCompressor {
+    fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>> {
+        let mut encoder = LZWEncoder::with_tiff_size_switch(weezl::BitOrder::Msb, 8);
+        Ok(encoder.encode(&bytes)?)
+    }
+}
 pub struct DeflateCompressor {}
 
 impl Compressor for DeflateCompressor {
@@ -37,15 +45,6 @@ impl Compressor for DeflateCompressor {
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&bytes)?;
         Ok(encoder.finish()?)
-    }
-}
-
-pub struct LZWCompressor {}
-
-impl Compressor for LZWCompressor {
-    fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>> {
-        let mut encoder = LZWEncoder::with_tiff_size_switch(weezl::BitOrder::Msb, 8);
-        Ok(encoder.encode(&bytes)?)
     }
 }
 
