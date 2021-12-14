@@ -26,7 +26,11 @@ fn encode_decode_with_compression(compression: CompressionMethod) {
 
         for x in 0..data1_dims.0 {
             for y in 0..data1_dims.1 {
-                let val = (x + y) % std::u8::MAX as u32;
+                let mut val = (x + y) % std::u8::MAX as u32;
+                // to have repeating values to compress
+                if x < data1_dims.0 / 2 {
+                    val = (data1_dims.0 / 2) % std::u16::MAX as u32;
+                }
                 data1.push(val as u8);
             }
         }
@@ -124,7 +128,6 @@ fn encode_decode_with_olddeflate() {
 }
 
 #[test]
-#[should_panic(expected = "CompressionMethod is not supported.")]
 fn encode_decode_with_packbits() {
     encode_decode_with_compression(CompressionMethod::PackBits);
 }
