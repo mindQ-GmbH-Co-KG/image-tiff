@@ -394,6 +394,18 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
     where
         [T::Inner]: TiffValue,
     {
+        match self.compression {
+            Some(tags::CompressionMethod::PackBits) => {
+                // Additional rule to PackBits compression:
+                // Pack each row separately. Do not compress across row boundaries
+                self.rows_per_strip = 1;
+                self.strip_count = u64::from(self.height);
+                self.encoder
+                    .write_tag(Tag::RowsPerStrip, u32::try_from(self.rows_per_strip)?)?;
+            }
+            Some(_) | None => {}
+        }
+
         let num_pix = usize::try_from(self.width)?
             .checked_mul(usize::try_from(self.height)?)
             .ok_or_else(|| {
