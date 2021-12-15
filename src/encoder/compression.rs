@@ -19,10 +19,12 @@ pub fn supported(compression: CompressionMethod) -> bool {
     }
 }
 
+/// Trait for objects that can compress bytes.
 pub trait Compressor {
     fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>>;
 }
 
+/// Compressor that does not compress any bytes.
 pub struct NoneCompressor {}
 
 impl Compressor for NoneCompressor {
@@ -31,6 +33,7 @@ impl Compressor for NoneCompressor {
     }
 }
 
+/// Compressor that uses the LZW algorithm to compress bytes.
 pub struct LZWCompressor {}
 
 impl Compressor for LZWCompressor {
@@ -39,6 +42,9 @@ impl Compressor for LZWCompressor {
         Ok(encoder.encode(&bytes)?)
     }
 }
+
+/// Compressor that uses the Deflate algorithm to compress bytes.
+/// (The compression level "default" is used)
 pub struct DeflateCompressor {}
 
 impl Compressor for DeflateCompressor {
@@ -49,6 +55,11 @@ impl Compressor for DeflateCompressor {
     }
 }
 
+/// Compressor that uses the Packbits[^note] algorithm to compress bytes.
+///
+/// [^note]: PackBits is often ineffective on continuous tone images,
+///          including many grayscale images. In such cases, it is better
+///          to leave the image uncompressed.
 pub struct PackbitsCompressor {}
 
 impl Compressor for PackbitsCompressor {
