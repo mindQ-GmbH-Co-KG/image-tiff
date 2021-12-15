@@ -368,10 +368,10 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind> ImageEncoder<'a, W, T,
         }
 
         let compressor: &dyn Compressor = match self.compression {
-            Some(tags::CompressionMethod::None) | None => &NoneCompressor {},
-            Some(tags::CompressionMethod::LZW) => &LZWCompressor {},
-            Some(tags::CompressionMethod::Deflate) => &DeflateCompressor {},
-            Some(tags::CompressionMethod::PackBits) => &PackbitsCompressor {},
+            Some(tags::CompressionMethod::None) | None => &NoneCompressor,
+            Some(tags::CompressionMethod::LZW) => &LZWCompressor,
+            Some(tags::CompressionMethod::Deflate) => &DeflateCompressor,
+            Some(tags::CompressionMethod::PackBits) => &PackbitsCompressor,
             Some(_) => {
                 // Implement different compression algorithms
                 unimplemented!("Compression not implemented")

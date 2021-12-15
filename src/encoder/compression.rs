@@ -1,6 +1,5 @@
+use crate::{error::TiffResult, tags::CompressionMethod, TiffError::CompressionError};
 use std::io::prelude::*;
-
-use crate::{error::TiffResult, tags::CompressionMethod};
 
 extern crate weezl;
 use weezl::encode::Encoder as LZWEncoder;
@@ -25,7 +24,7 @@ pub trait Compressor {
 }
 
 /// Compressor that does not compress any bytes.
-pub struct NoneCompressor {}
+pub struct NoneCompressor;
 
 impl Compressor for NoneCompressor {
     fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>> {
@@ -34,7 +33,7 @@ impl Compressor for NoneCompressor {
 }
 
 /// Compressor that uses the LZW algorithm to compress bytes.
-pub struct LZWCompressor {}
+pub struct LZWCompressor;
 
 impl Compressor for LZWCompressor {
     fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>> {
@@ -45,7 +44,7 @@ impl Compressor for LZWCompressor {
 
 /// Compressor that uses the Deflate algorithm to compress bytes.
 /// (The compression level "default" is used)
-pub struct DeflateCompressor {}
+pub struct DeflateCompressor;
 
 impl Compressor for DeflateCompressor {
     fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>> {
@@ -60,83 +59,104 @@ impl Compressor for DeflateCompressor {
 /// [^note]: PackBits is often ineffective on continuous tone images,
 ///          including many grayscale images. In such cases, it is better
 ///          to leave the image uncompressed.
-pub struct PackbitsCompressor {}
+pub struct PackbitsCompressor;
 
 impl Compressor for PackbitsCompressor {
     fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>> {
-        if bytes.len() == 0 {
-            return Ok(Vec::new());
+        // Port from https://github.com/skirridsystems/packbits
+        const MIN_REPT: u16 = 3; // Minimum run to compress between differ blocks
+        const MAX_REPT: u16 = 128; // Maximum run of repeated byte
+        const MAX_DIFF: u16 = 128; // Maximum run of differing bytes
+
+        // Encoding for header byte based on number of bytes represented.
+        fn encode_diff(n: u16) -> u8 {
+            (n - 1) as u8
+        }
+        fn encode_rept(n: u16) -> u8 {
+            // like wrapping i8 and cast to u8
+            let var = 256 - (n - 1);
+            var as u8
         }
 
-        let mut compressed_data = Vec::<u8>::new();
-        let mut buffer = Vec::<u8>::new();
-        let mut pos: usize = 0;
-        let mut repeat_count: u8 = 0;
-        const MAX_LENGTH: usize = 127;
-        let mut byte_is_repeating = false;
+        let mut dest = Vec::<u8>::new();
+        let mut src_itr: usize = 0; // Index of the current byte
+        let mut src_count = bytes.len();
 
-        fn append_raw(buffer: &mut Vec<u8>, result: &mut Vec<u8>) {
-            if buffer.len() == 0 {
-                return;
-            }
-            result.push(buffer.len() as u8 - 1);
-            result.append(buffer);
+        let mut in_run = false;
+        let mut run_start: u16 = 0; // Distance into pending bytes that a run starts
+
+        let mut bytes_pending: u16 = 0; // Bytes looked at but not yet output
+        let mut pending_itr: usize = 0; // Index of the first pending byte
+
+        let mut curr_byte: u8; // Byte currently being considered
+        let mut last_byte: u8; // Previous byte
+
+        // Need at least one byte to compress
+        if src_count == 0 {
+            return Err(CompressionError {});
         }
 
-        fn append_rle(result: &mut Vec<u8>, repeat_count: u8) {
-            let val: u16 = 256 - (repeat_count - 1) as u16;
-            result.push(val as u8);
-        }
+        // Prime compressor with first character.
+        last_byte = bytes[src_itr];
+        src_itr += 1;
+        bytes_pending += 1;
 
-        while pos < bytes.len() - 1 {
-            let current_byte = bytes[pos];
+        while src_count - 1 != 0 {
+            src_count -= 1;
+            curr_byte = bytes[src_itr];
+            src_itr += 1;
+            bytes_pending += 1;
 
-            if bytes[pos] == bytes[pos + 1] {
-                if byte_is_repeating == false {
-                    // end of RAW bytes
-                    append_raw(&mut buffer, &mut compressed_data);
-                    byte_is_repeating = true;
-                    repeat_count = 1;
-                } else if byte_is_repeating == true {
-                    if repeat_count as usize == MAX_LENGTH {
-                        // restart the encoding
-                        append_rle(&mut compressed_data, repeat_count);
-                        repeat_count = 0;
-                        compressed_data.push(bytes[pos]);
-                    }
-                    // move to next byte
-                    repeat_count += 1;
+            if in_run {
+                if (curr_byte != last_byte) || (bytes_pending > MAX_REPT) {
+                    dest.push(encode_rept(bytes_pending - 1));
+                    dest.push(last_byte);
+
+                    bytes_pending = 1;
+                    pending_itr = src_itr - 1;
+                    run_start = 0;
+                    in_run = false;
                 }
             } else {
-                if byte_is_repeating == true {
-                    repeat_count += 1;
-                    append_rle(&mut compressed_data, repeat_count);
-                    repeat_count = 0;
-                    compressed_data.push(bytes[pos]);
-                    byte_is_repeating = false;
-                } else if byte_is_repeating == false {
-                    if buffer.len() == MAX_LENGTH {
-                        // restart the encoding
-                        append_raw(&mut buffer, &mut compressed_data);
-                        ();
+                if bytes_pending > MAX_DIFF {
+                    // We have as much differing data as we can output in one chunk.
+                    // Output MAX_DIFF leaving one byte.
+                    dest.push(encode_diff(MAX_DIFF));
+                    dest.extend_from_slice(&bytes[pending_itr..pending_itr + MAX_DIFF as usize]);
+
+                    pending_itr += MAX_DIFF as usize;
+                    bytes_pending -= MAX_DIFF;
+                    run_start = bytes_pending - 1; // A run could start here
+                } else if curr_byte == last_byte {
+                    if (bytes_pending - run_start >= MIN_REPT) || (run_start == 0) {
+                        // This is a worthwhile run
+                        if run_start != 0 {
+                            // Flush differing data out of input buffer
+                            dest.push(encode_diff(run_start));
+                            dest.extend_from_slice(
+                                &bytes[pending_itr..pending_itr + run_start as usize],
+                            );
+                        }
+                        bytes_pending -= run_start; // Length of run
+                        in_run = true;
                     }
-                    buffer.push(current_byte);
+                } else {
+                    run_start = bytes_pending - 1; // A run could start here
                 }
             }
-            pos += 1;
+            last_byte = curr_byte;
         }
 
-        if byte_is_repeating == false {
-            buffer.push(bytes[pos]);
-            append_raw(&mut buffer, &mut compressed_data);
-            ();
+        // Output the remainder
+        if in_run {
+            dest.push(encode_rept(bytes_pending));
+            dest.push(last_byte);
         } else {
-            repeat_count += 1;
-            append_rle(&mut compressed_data, repeat_count);
-            compressed_data.push(bytes[pos]);
+            dest.push(encode_diff(bytes_pending));
+            dest.extend_from_slice(&bytes[pending_itr..pending_itr + bytes_pending as usize]);
         }
 
-        Ok(compressed_data)
+        Ok(dest)
     }
 }
 
