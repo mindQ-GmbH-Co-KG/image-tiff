@@ -64,29 +64,28 @@ pub struct PackbitsCompressor;
 impl Compressor for PackbitsCompressor {
     fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>> {
         // Port from https://github.com/skirridsystems/packbits
-        const MIN_REPT: u16 = 3; // Minimum run to compress between differ blocks
-        const MAX_REPT: u16 = 128; // Maximum run of repeated byte
-        const MAX_DIFF: u16 = 128; // Maximum run of differing bytes
+        const MIN_REPT: u8 = 3; // minimum run to compress between differ blocks
+        const MAX_BYTES: u8 = 128; // maximum number of bytes that can be encoded in a header byte
 
         // Encoding for header byte based on number of bytes represented.
-        fn encode_diff(n: u16) -> u8 {
-            (n - 1) as u8
+        fn encode_diff(n: u8) -> u8 {
+            n - 1
         }
-        fn encode_rept(n: u16) -> u8 {
+        fn encode_rept(n: u8) -> u8 {
             // like wrapping i8 and cast to u8
-            let var = 256 - (n - 1);
+            let var = 256 - (n as u16 - 1);
             var as u8
         }
 
-        let mut dest = Vec::<u8>::new();
-        let mut src_itr: usize = 0; // Index of the current byte
+        let mut compressed_bytes = Vec::<u8>::new();
+        let mut src_index: usize = 0; // Index of the current byte
         let mut src_count = bytes.len();
 
         let mut in_run = false;
-        let mut run_start: u16 = 0; // Distance into pending bytes that a run starts
+        let mut run_index: u8 = 0; // Distance into pending bytes that a run starts
 
-        let mut bytes_pending: u16 = 0; // Bytes looked at but not yet output
-        let mut pending_itr: usize = 0; // Index of the first pending byte
+        let mut bytes_pending: u8 = 0; // Bytes looked at but not yet output
+        let mut pending_index: usize = 0; // Index of the first pending byte
 
         let mut curr_byte: u8; // Byte currently being considered
         let mut last_byte: u8; // Previous byte
@@ -97,51 +96,53 @@ impl Compressor for PackbitsCompressor {
         }
 
         // Prime compressor with first character.
-        last_byte = bytes[src_itr];
-        src_itr += 1;
+        last_byte = bytes[src_index];
+        src_index += 1;
         bytes_pending += 1;
 
         while src_count - 1 != 0 {
             src_count -= 1;
-            curr_byte = bytes[src_itr];
-            src_itr += 1;
+            curr_byte = bytes[src_index];
+            src_index += 1;
             bytes_pending += 1;
 
             if in_run {
-                if (curr_byte != last_byte) || (bytes_pending > MAX_REPT) {
-                    dest.push(encode_rept(bytes_pending - 1));
-                    dest.push(last_byte);
+                if (curr_byte != last_byte) || (bytes_pending > MAX_BYTES) {
+                    compressed_bytes.push(encode_rept(bytes_pending - 1));
+                    compressed_bytes.push(last_byte);
 
                     bytes_pending = 1;
-                    pending_itr = src_itr - 1;
-                    run_start = 0;
+                    pending_index = src_index - 1;
+                    run_index = 0;
                     in_run = false;
                 }
             } else {
-                if bytes_pending > MAX_DIFF {
+                if bytes_pending > MAX_BYTES {
                     // We have as much differing data as we can output in one chunk.
-                    // Output MAX_DIFF leaving one byte.
-                    dest.push(encode_diff(MAX_DIFF));
-                    dest.extend_from_slice(&bytes[pending_itr..pending_itr + MAX_DIFF as usize]);
+                    // Output MAX_BYTES leaving one byte.
+                    compressed_bytes.push(encode_diff(MAX_BYTES));
+                    compressed_bytes.extend_from_slice(
+                        &bytes[pending_index..pending_index + MAX_BYTES as usize],
+                    );
 
-                    pending_itr += MAX_DIFF as usize;
-                    bytes_pending -= MAX_DIFF;
-                    run_start = bytes_pending - 1; // A run could start here
+                    pending_index += MAX_BYTES as usize;
+                    bytes_pending -= MAX_BYTES;
+                    run_index = bytes_pending - 1; // A run could start here
                 } else if curr_byte == last_byte {
-                    if (bytes_pending - run_start >= MIN_REPT) || (run_start == 0) {
+                    if (bytes_pending - run_index >= MIN_REPT) || (run_index == 0) {
                         // This is a worthwhile run
-                        if run_start != 0 {
+                        if run_index != 0 {
                             // Flush differing data out of input buffer
-                            dest.push(encode_diff(run_start));
-                            dest.extend_from_slice(
-                                &bytes[pending_itr..pending_itr + run_start as usize],
+                            compressed_bytes.push(encode_diff(run_index));
+                            compressed_bytes.extend_from_slice(
+                                &bytes[pending_index..pending_index + run_index as usize],
                             );
                         }
-                        bytes_pending -= run_start; // Length of run
+                        bytes_pending -= run_index; // Length of run
                         in_run = true;
                     }
                 } else {
-                    run_start = bytes_pending - 1; // A run could start here
+                    run_index = bytes_pending - 1; // A run could start here
                 }
             }
             last_byte = curr_byte;
@@ -149,14 +150,15 @@ impl Compressor for PackbitsCompressor {
 
         // Output the remainder
         if in_run {
-            dest.push(encode_rept(bytes_pending));
-            dest.push(last_byte);
+            compressed_bytes.push(encode_rept(bytes_pending));
+            compressed_bytes.push(last_byte);
         } else {
-            dest.push(encode_diff(bytes_pending));
-            dest.extend_from_slice(&bytes[pending_itr..pending_itr + bytes_pending as usize]);
+            compressed_bytes.push(encode_diff(bytes_pending));
+            compressed_bytes
+                .extend_from_slice(&bytes[pending_index..pending_index + bytes_pending as usize]);
         }
 
-        Ok(dest)
+        Ok(compressed_bytes)
     }
 }
 
