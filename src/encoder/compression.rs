@@ -64,16 +64,15 @@ pub struct PackbitsCompressor;
 impl Compressor for PackbitsCompressor {
     fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>> {
         // Port from https://github.com/skirridsystems/packbits
-        const MIN_REPT: u8 = 3; // minimum run to compress between differ blocks
-        const MAX_BYTES: u8 = 128; // maximum number of bytes that can be encoded in a header byte
+        const MIN_REPT: u8 = 3; // Minimum run to compress between differ blocks
+        const MAX_BYTES: u8 = 128; // Maximum number of bytes that can be encoded in a header byte
 
         // Encoding for header byte based on number of bytes represented.
         fn encode_diff(n: u8) -> u8 {
             n - 1
         }
         fn encode_rept(n: u8) -> u8 {
-            // like wrapping i8 and cast to u8
-            let var = 256 - (n as u16 - 1);
+            let var = 256 - (n - 1) as u16;
             var as u8
         }
 
