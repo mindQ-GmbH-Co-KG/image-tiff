@@ -2,16 +2,16 @@ extern crate tiff;
 
 use std::io::{Cursor, Seek, SeekFrom};
 use tiff::decoder::{Decoder, DecodingResult};
+use tiff::encoder::compression::*;
 use tiff::encoder::{colortype, TiffEncoder};
-use tiff::tags::CompressionMethod;
 
-fn encode_decode_with_compression(compression: CompressionMethod) {
+fn encode_decode_with_compression<C: Compressor + Clone>(compression: C) {
     let mut img_file = Cursor::new(Vec::new());
 
-    let data0_dims: (u32, u32) = (100, 70);
-    let data1_dims: (u32, u32) = (210, 100);
-    let mut data0: Vec<u16> = Vec::with_capacity(100 * 70 * 3);
-    let mut data1: Vec<u8> = Vec::with_capacity(210 * 100 * 3);
+    let data0_dims: (u32, u32) = (1, 7);
+    let data1_dims: (u32, u32) = (21, 10);
+    let mut data0: Vec<u16> = Vec::with_capacity((data0_dims.0 * data0_dims.1) as usize * 3);
+    let mut data1: Vec<u8> = Vec::with_capacity((data1_dims.0 * data1_dims.1) as usize * 3);
 
     // create test data
     {
@@ -42,17 +42,23 @@ fn encode_decode_with_compression(compression: CompressionMethod) {
         let mut encoder = TiffEncoder::new(&mut img_file).unwrap();
 
         // write first colored image (100x70 16-bit)
-        let mut image0 = encoder
-            .new_image::<colortype::RGB16>(data0_dims.0, data0_dims.1)
+        let image0 = encoder
+            .new_image_with_compression::<colortype::RGB16, C>(
+                data0_dims.0,
+                data0_dims.1,
+                compression.clone(),
+            )
             .unwrap();
-        image0.compression(compression).unwrap();
         image0.write_data(&data0[..]).unwrap();
 
         // write second grayscale image (210x100 8-bit)
-        let mut image1 = encoder
-            .new_image::<colortype::Gray8>(data1_dims.0, data1_dims.1)
+        let image1 = encoder
+            .new_image_with_compression::<colortype::Gray8, C>(
+                data1_dims.0,
+                data1_dims.1,
+                compression,
+            )
             .unwrap();
-        image1.compression(compression).unwrap();
         image1.write_data(&data1[..]).unwrap();
     }
     img_file.seek(SeekFrom::Start(0)).unwrap();
@@ -78,56 +84,24 @@ fn encode_decode_with_compression(compression: CompressionMethod) {
 
 #[test]
 fn encode_decode_without_compression() {
-    encode_decode_with_compression(CompressionMethod::None);
-}
-
-#[test]
-#[should_panic(expected = "CompressionMethod is not supported.")]
-fn encode_decode_with_huffman() {
-    encode_decode_with_compression(CompressionMethod::Huffman);
-}
-
-#[test]
-#[should_panic(expected = "CompressionMethod is not supported.")]
-fn encode_decode_with_fax3() {
-    encode_decode_with_compression(CompressionMethod::Fax3);
-}
-
-#[test]
-#[should_panic(expected = "CompressionMethod is not supported.")]
-fn encode_decode_with_fax4() {
-    encode_decode_with_compression(CompressionMethod::Fax4);
+    let compressor = NoneCompressor;
+    encode_decode_with_compression(compressor);
 }
 
 #[test]
 fn encode_decode_with_lzw() {
-    encode_decode_with_compression(CompressionMethod::LZW);
-}
-
-#[test]
-#[should_panic(expected = "CompressionMethod is not supported.")]
-fn encode_decode_with_jpeg() {
-    encode_decode_with_compression(CompressionMethod::JPEG);
-}
-
-#[test]
-#[should_panic(expected = "CompressionMethod is not supported.")]
-fn encode_decode_with_modernjpeg() {
-    encode_decode_with_compression(CompressionMethod::ModernJPEG);
+    let compressor = LZWCompressor::default();
+    encode_decode_with_compression(compressor);
 }
 
 #[test]
 fn encode_decode_with_deflate() {
-    encode_decode_with_compression(CompressionMethod::Deflate);
-}
-
-#[test]
-#[should_panic(expected = "CompressionMethod is not supported.")]
-fn encode_decode_with_olddeflate() {
-    encode_decode_with_compression(CompressionMethod::OldDeflate);
+    let compressor = DeflateCompressor::default();
+    encode_decode_with_compression(compressor);
 }
 
 #[test]
 fn encode_decode_with_packbits() {
-    encode_decode_with_compression(CompressionMethod::PackBits);
+    let compressor = PackbitsCompressor::default();
+    encode_decode_with_compression(compressor);
 }
