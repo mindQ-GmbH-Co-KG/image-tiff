@@ -1,5 +1,7 @@
-use crate::{error::TiffResult, tags::CompressionMethod};
-use std::io::prelude::*;
+use std::{
+    convert::{TryFrom, TryInto},
+    io::prelude::*,
+};
 
 extern crate weezl;
 use weezl::encode::Encoder as LZWEncoder;
@@ -7,50 +9,149 @@ use weezl::encode::Encoder as LZWEncoder;
 extern crate flate2;
 use flate2::{write::ZlibEncoder, Compression};
 
-/// Indicates whether a compression method is supported for encoding image data.
-pub fn supported(compression: CompressionMethod) -> bool {
-    match compression {
-        CompressionMethod::None => true,
-        CompressionMethod::LZW => true,
-        CompressionMethod::Deflate => true,
-        CompressionMethod::PackBits => true,
-        _ => false,
-    }
-}
+use crate::{
+    encoder::{ColorType, DirectoryEncoder, TiffKind, TiffValue},
+    error::TiffResult,
+    tags::CompressionMethod,
+};
 
 /// Trait for objects that can compress bytes.
 pub trait Compressor {
-    fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>>;
+    const COMPRESSION_METHOD: CompressionMethod;
+
+    /// Write the data of a specific color type to the given encoder and return the offset and byte count, respectively.
+    fn write_to<'a, T: ColorType, K: TiffKind, W: 'a + Write + Seek>(
+        &mut self,
+        encoder: &mut DirectoryEncoder<'a, W, K>,
+        value: &[T::Inner],
+    ) -> TiffResult<(K::OffsetType, K::OffsetType)>
+    where
+        [T::Inner]: TiffValue;
 }
 
 /// Compressor that does not compress any bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct NoneCompressor;
 
 impl Compressor for NoneCompressor {
-    fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>> {
-        Ok(bytes)
+    const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::None;
+
+    fn write_to<'a, T: ColorType, K: TiffKind, W: 'a + Write + Seek>(
+        &mut self,
+        encoder: &mut DirectoryEncoder<'a, W, K>,
+        value: &[T::Inner],
+    ) -> TiffResult<(K::OffsetType, K::OffsetType)>
+    where
+        [T::Inner]: TiffValue,
+    {
+        let byte_count = value.len().try_into()?;
+        let offset = encoder.write_data(value).and_then(K::convert_offset)?;
+        Ok((offset, byte_count))
     }
 }
 
 /// Compressor that uses the LZW algorithm to compress bytes.
-pub struct LZWCompressor;
+#[derive(Debug, Clone)]
+pub struct LZWCompressor {
+    buffer: Vec<u8>,
+}
+
+impl Default for LZWCompressor {
+    fn default() -> Self {
+        // Lets be greedy and allocate more bytes in advance. We will likely encode longer image strips.
+        const DEFAULT_BUFFER_SIZE: usize = 256;
+        Self {
+            buffer: Vec::with_capacity(DEFAULT_BUFFER_SIZE),
+        }
+    }
+}
 
 impl Compressor for LZWCompressor {
-    fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>> {
-        let mut encoder = LZWEncoder::with_tiff_size_switch(weezl::BitOrder::Msb, 8);
-        Ok(encoder.encode(&bytes)?)
+    const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::LZW;
+
+    fn write_to<'a, T: ColorType, K: TiffKind, W: 'a + Write + Seek>(
+        &mut self,
+        encoder: &mut DirectoryEncoder<'a, W, K>,
+        value: &[T::Inner],
+    ) -> TiffResult<(K::OffsetType, K::OffsetType)>
+    where
+        [T::Inner]: TiffValue,
+    {
+        let bytes = value.data();
+        let compressed_byte_count = {
+            let mut encoder = LZWEncoder::with_tiff_size_switch(weezl::BitOrder::Msb, 8);
+            let result = encoder.into_vec(&mut self.buffer).encode(&bytes);
+            result.status.map(|_| result.consumed_out)
+        }?
+        .try_into()?;
+
+        let offset = encoder
+            .write_data(self.buffer.as_slice())
+            .and_then(K::convert_offset)?;
+
+        // Clear the buffer for the next compression.
+        self.buffer.clear();
+
+        Ok((offset, compressed_byte_count))
     }
 }
 
 /// Compressor that uses the Deflate algorithm to compress bytes.
-/// (The compression level "default" is used)
-pub struct DeflateCompressor;
+#[derive(Debug, Clone)]
+pub struct DeflateCompressor {
+    pub level: Compression,
+    buffer: Vec<u8>,
+}
+
+impl DeflateCompressor {
+    /// Lets be greedy and allocate more bytes in advance. We will likely encode longer image strips.
+    const DEFAULT_BUFFER_SIZE: usize = 256;
+
+    /// Create a new deflate compr+essor with a specific level of compression.
+    pub fn with_level(level: Compression) -> Self {
+        Self {
+            buffer: Vec::with_capacity(Self::DEFAULT_BUFFER_SIZE),
+            level,
+        }
+    }
+}
+
+impl Default for DeflateCompressor {
+    fn default() -> Self {
+        Self {
+            buffer: Vec::with_capacity(Self::DEFAULT_BUFFER_SIZE),
+            level: Compression::default(),
+        }
+    }
+}
 
 impl Compressor for DeflateCompressor {
-    fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>> {
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(&bytes)?;
-        Ok(encoder.finish()?)
+    const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::Deflate;
+
+    fn write_to<'a, T: ColorType, K: TiffKind, W: 'a + Write + Seek>(
+        &mut self,
+        encoder: &mut DirectoryEncoder<'a, W, K>,
+        value: &[T::Inner],
+    ) -> TiffResult<(K::OffsetType, K::OffsetType)>
+    where
+        [T::Inner]: TiffValue,
+    {
+        let data = value.data();
+        {
+            let mut encoder = ZlibEncoder::new(&mut self.buffer, self.level);
+            encoder.write_all(&data)?;
+            encoder.finish()?;
+        }
+
+        let compressed_byte_count = self.buffer.len().try_into()?;
+        let offset = encoder
+            .write_data(self.buffer.as_slice())
+            .and_then(K::convert_offset)?;
+
+        // Clear the buffer for the next compression.
+        self.buffer.clear();
+
+        Ok((offset, compressed_byte_count))
     }
 }
 
@@ -59,10 +160,22 @@ impl Compressor for DeflateCompressor {
 /// [^note]: PackBits is often ineffective on continuous tone images,
 ///          including many grayscale images. In such cases, it is better
 ///          to leave the image uncompressed.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct PackbitsCompressor;
 
 impl Compressor for PackbitsCompressor {
-    fn compress(&self, bytes: Vec<u8>) -> TiffResult<Vec<u8>> {
+    const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::PackBits;
+
+    fn write_to<'a, T: ColorType, K: TiffKind, W: 'a + Write + Seek>(
+        &mut self,
+        encoder: &mut DirectoryEncoder<'a, W, K>,
+        value: &[T::Inner],
+    ) -> TiffResult<(K::OffsetType, K::OffsetType)>
+    where
+        [T::Inner]: TiffValue,
+    {
+        let bytes = value.data();
+
         // Port from https://github.com/skirridsystems/packbits
         const MIN_REPT: u8 = 3; // Minimum run to compress between differ blocks
         const MAX_BYTES: u8 = 128; // Maximum number of bytes that can be encoded in a header byte
@@ -76,22 +189,21 @@ impl Compressor for PackbitsCompressor {
             var as u8
         }
 
-        let mut compressed_bytes = Vec::<u8>::new();
         let mut src_index: usize = 0; // Index of the current byte
         let mut src_count = bytes.len();
 
         let mut in_run = false;
-        let mut run_index: u8 = 0; // Distance into pending bytes that a run starts
+        let mut run_index = 0u8; // Distance into pending bytes that a run starts
 
-        let mut bytes_pending: u8 = 0; // Bytes looked at but not yet output
-        let mut pending_index: usize = 0; // Index of the first pending byte
+        let mut bytes_pending = 0u8; // Bytes looked at but not yet output
+        let mut pending_index = 0usize; // Index of the first pending byte
 
         let mut curr_byte: u8; // Byte currently being considered
         let mut last_byte: u8; // Previous byte
 
         // Need at least one byte to compress
         if src_count == 0 {
-            return Ok(Vec::new());
+            return Ok((K::OffsetType::try_from(0)?, K::OffsetType::try_from(0)?));
         }
 
         // Prime compressor with first character.
@@ -107,8 +219,8 @@ impl Compressor for PackbitsCompressor {
 
             if in_run {
                 if (curr_byte != last_byte) || (bytes_pending > MAX_BYTES) {
-                    compressed_bytes.push(encode_rept(bytes_pending - 1));
-                    compressed_bytes.push(last_byte);
+                    encoder.write_data(encode_rept(bytes_pending - 1))?;
+                    encoder.write_data(last_byte)?;
 
                     bytes_pending = 1;
                     pending_index = src_index - 1;
@@ -119,10 +231,9 @@ impl Compressor for PackbitsCompressor {
                 if bytes_pending > MAX_BYTES {
                     // We have as much differing data as we can output in one chunk.
                     // Output MAX_BYTES leaving one byte.
-                    compressed_bytes.push(encode_diff(MAX_BYTES));
-                    compressed_bytes.extend_from_slice(
-                        &bytes[pending_index..pending_index + MAX_BYTES as usize],
-                    );
+                    encoder.write_data(encode_diff(MAX_BYTES))?;
+                    encoder
+                        .write_data(&bytes[pending_index..pending_index + MAX_BYTES as usize])?;
 
                     pending_index += MAX_BYTES as usize;
                     bytes_pending -= MAX_BYTES;
@@ -132,10 +243,10 @@ impl Compressor for PackbitsCompressor {
                         // This is a worthwhile run
                         if run_index != 0 {
                             // Flush differing data out of input buffer
-                            compressed_bytes.push(encode_diff(run_index));
-                            compressed_bytes.extend_from_slice(
+                            encoder.write_data(encode_diff(run_index))?;
+                            encoder.write_data(
                                 &bytes[pending_index..pending_index + run_index as usize],
-                            );
+                            )?;
                         }
                         bytes_pending -= run_index; // Length of run
                         in_run = true;
@@ -148,16 +259,18 @@ impl Compressor for PackbitsCompressor {
         }
 
         // Output the remainder
-        if in_run {
-            compressed_bytes.push(encode_rept(bytes_pending));
-            compressed_bytes.push(last_byte);
+        let offset = if in_run {
+            encoder.write_data(encode_rept(bytes_pending))?;
+            encoder.write_data(last_byte)?
         } else {
-            compressed_bytes.push(encode_diff(bytes_pending));
-            compressed_bytes
-                .extend_from_slice(&bytes[pending_index..pending_index + bytes_pending as usize]);
-        }
+            encoder.write_data(encode_diff(bytes_pending))?;
+            encoder.write_data(&bytes[pending_index..pending_index + bytes_pending as usize])?
+        };
 
-        Ok(compressed_bytes)
+        Ok((
+            K::convert_offset(offset)?,
+            unimplemented!("We need to count the written bytes: Start offset - end offset?"),
+        ))
     }
 }
 
@@ -165,35 +278,21 @@ impl Compressor for PackbitsCompressor {
 mod test {
     use super::*;
 
-    fn get_test_data() -> Vec<u8> {
-        b"This is a string for checking various compression algorithms.".to_vec()
-    }
-
-    #[test]
-    fn test_suported_compressionmethods() {
-        assert_eq!(supported(CompressionMethod::None), true);
-        assert_eq!(supported(CompressionMethod::Huffman), false);
-        assert_eq!(supported(CompressionMethod::Fax3), false);
-        assert_eq!(supported(CompressionMethod::Fax4), false);
-        assert_eq!(supported(CompressionMethod::LZW), true);
-        assert_eq!(supported(CompressionMethod::JPEG), false);
-        assert_eq!(supported(CompressionMethod::ModernJPEG), false);
-        assert_eq!(supported(CompressionMethod::Deflate), true);
-        assert_eq!(supported(CompressionMethod::OldDeflate), false);
-        assert_eq!(supported(CompressionMethod::PackBits), true);
+    fn get_test_data() -> &'static [u8] {
+        b"This is a string for checking various compression algorithms."
     }
 
     #[test]
     fn test_no_compression() {
-        let compressor = NoneCompressor {};
-        let compressed_data = compressor.compress(get_test_data()).unwrap();
+        let compressor = NoneCompressor;
+        let compressed_data = compressor.write_to(get_test_data()).unwrap();
         assert_eq!(compressed_data, get_test_data());
     }
 
     #[test]
     fn test_deflate() {
-        let compressor = DeflateCompressor {};
-        let compressed_data = compressor.compress(get_test_data()).unwrap();
+        let compressor = DeflateCompressor::default();
+        let compressed_data = compressor.write_to(get_test_data()).unwrap();
         let expected = vec![
             0x78, 0x9C, 0x15, 0xC7, 0xD1, 0x0D, 0x80, 0x20, 0x0C, 0x04, 0xD0, 0x55, 0x6E, 0x02,
             0xA7, 0x71, 0x81, 0xA6, 0x41, 0xDA, 0x28, 0xD4, 0xF4, 0xD0, 0xF9, 0x81, 0xE4, 0xFD,
@@ -206,8 +305,8 @@ mod test {
 
     #[test]
     fn test_lzw() {
-        let compressor = LZWCompressor {};
-        let compressed_data = compressor.compress(get_test_data()).unwrap();
+        let compressor = LZWCompressor::default();
+        let compressed_data = compressor.write_to(get_test_data()).unwrap();
         let expected = vec![
             0x80, 0x15, 0x0D, 0x06, 0x93, 0x98, 0x82, 0x08, 0x20, 0x30, 0x88, 0x0E, 0x67, 0x43,
             0x91, 0xA4, 0xDC, 0x67, 0x10, 0x19, 0x8D, 0xE7, 0x21, 0x01, 0x8C, 0xD0, 0x65, 0x31,
@@ -220,27 +319,26 @@ mod test {
 
     #[test]
     fn test_packbits() {
-        let compressor = PackbitsCompressor {};
+        let compressor = PackbitsCompressor;
 
         // compress empty buffer
         {
-            let compressed_data = compressor.compress(Vec::<u8>::new()).unwrap();
+            let compressed_data = compressor.write_to(&[]).unwrap();
             let expected = Vec::<u8>::new();
             assert_eq!(compressed_data, expected);
         }
 
         // compress single byte
         {
-            let compressed_data = compressor.compress(vec![0x3F]).unwrap();
+            let compressed_data = compressor.write_to(&[0x3F]).unwrap();
             let expected = vec![0x00, 0x3F];
             assert_eq!(compressed_data, expected);
         }
 
         // compress buffer with repetitive sequence
         {
-            let data =
-                b"This strrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrring hangs.".to_vec();
-            let compressed_data = compressor.compress(data).unwrap();
+            let data = b"This strrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrring hangs.";
+            let compressed_data = compressor.write_to(data).unwrap();
             let expected = b"\x06This st\xD1r\x09ing hangs.".to_vec();
             assert_eq!(compressed_data, expected);
         }
@@ -256,7 +354,7 @@ mod test {
                 data.push(i);
             }
 
-            let compressed_data = compressor.compress(data).unwrap();
+            let compressed_data = compressor.write_to(&data).unwrap();
             let expected = vec![
                 0x06, 0x54, 0x68, 0x69, 0x73, 0x20, 0x73, 0x74, 0x81, 0x72, 0xE3, 0x72, 0x7F, 0x69,
                 0x6E, 0x67, 0x20, 0x68, 0x61, 0x6E, 0x67, 0x73, 0x2E, 0x00, 0x01, 0x02, 0x03, 0x04,
@@ -277,7 +375,7 @@ mod test {
 
         // compress teststring
         {
-            let compressed_data = compressor.compress(get_test_data()).unwrap();
+            let compressed_data = compressor.write_to(get_test_data()).unwrap();
             let expected =
                 b"\x3CThis is a string for checking various compression algorithms.".to_vec();
             assert_eq!(compressed_data, expected);
