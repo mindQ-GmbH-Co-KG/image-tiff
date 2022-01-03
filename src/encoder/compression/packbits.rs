@@ -144,14 +144,6 @@ mod tests {
     use crate::encoder::compression::tests::{compress, TEST_DATA};
 
     #[test]
-    #[should_panic]
-    fn test_packbits_nothing() {
-        // compress zero bytes
-        const UNCOMPRESSED_DATA: [u8; 0] = [];
-        compress(&UNCOMPRESSED_DATA, PackbitsCompressor::default());
-    }
-
-    #[test]
     fn test_packbits_single() {
         // compress single byte
         const UNCOMPRESSED_DATA: [u8; 1] = [0x3F];
