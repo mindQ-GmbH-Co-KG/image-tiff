@@ -1,21 +1,25 @@
-use std::{convert::TryInto, io::prelude::*};
-
-use crate::{
-    encoder::{compression::Compressor, ColorType, DirectoryEncoder, TiffKind, TiffValue},
-    error::TiffResult,
-    tags::CompressionMethod,
+use std::{
+    convert::TryInto,
+    io::{Seek, Write},
 };
 
-extern crate weezl;
 use weezl::encode::Encoder as LZWEncoder;
 
-/// Compressor that uses the LZW algorithm to compress bytes.
+use crate::{
+    encoder::{
+        colortype::ColorType, compression::Compression, DirectoryEncoder, TiffKind, TiffValue,
+    },
+    tags::CompressionMethod,
+    TiffResult,
+};
+
+/// The LZW algorithm used to compress image data in TIFF files.
 #[derive(Debug, Clone)]
-pub struct LZWCompressor {
+pub struct Lzw {
     buffer: Vec<u8>,
 }
 
-impl Default for LZWCompressor {
+impl Default for Lzw {
     fn default() -> Self {
         // Lets be greedy and allocate more bytes in advance. We will likely encode longer image strips.
         const DEFAULT_BUFFER_SIZE: usize = 256;
@@ -25,7 +29,7 @@ impl Default for LZWCompressor {
     }
 }
 
-impl Compressor for LZWCompressor {
+impl Compression for Lzw {
     const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::LZW;
 
     fn write_to<'a, T: ColorType, K: TiffKind, W: 'a + Write + Seek>(
@@ -57,13 +61,10 @@ impl Compressor for LZWCompressor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::encoder::compression::tests::{compress, TEST_DATA};
 
     #[test]
     fn test_lzw() {
-        let compressed_data = compress(TEST_DATA, LZWCompressor::default());
-
         const EXPECTED_COMPRESSED_DATA: [u8; 63] = [
             0x80, 0x15, 0x0D, 0x06, 0x93, 0x98, 0x82, 0x08, 0x20, 0x30, 0x88, 0x0E, 0x67, 0x43,
             0x91, 0xA4, 0xDC, 0x67, 0x10, 0x19, 0x8D, 0xE7, 0x21, 0x01, 0x8C, 0xD0, 0x65, 0x31,
@@ -71,6 +72,8 @@ mod tests {
             0xC0, 0xE4, 0x65, 0x39, 0x9C, 0xCD, 0x26, 0xF3, 0x74, 0x20, 0xD8, 0x67, 0x89, 0x9A,
             0x4E, 0x86, 0x83, 0x69, 0xCC, 0x5D, 0x01,
         ];
+
+        let compressed_data = compress(TEST_DATA, super::Lzw::default());
         assert_eq!(compressed_data, EXPECTED_COMPRESSED_DATA);
     }
 }

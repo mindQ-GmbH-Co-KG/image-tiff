@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
     error::TiffResult,
-    tags::{self, ResolutionUnit, Tag},
+    tags::{ResolutionUnit, Tag},
 };
 
 pub mod colortype;
@@ -100,13 +100,13 @@ impl<W: Write + Seek, K: TiffKind> TiffEncoder<W, K> {
         &mut self,
         width: u32,
         height: u32,
-    ) -> TiffResult<ImageEncoder<W, C, K, NoneCompressor>> {
+    ) -> TiffResult<ImageEncoder<W, C, K, Uncompressed>> {
         let encoder = DirectoryEncoder::new(&mut self.writer)?;
         ImageEncoder::new(encoder, width, height)
     }
 
     /// Create an [`ImageEncoder`] to encode an image one slice at a time.
-    pub fn new_image_with_compression<C: ColorType, D: Compressor>(
+    pub fn new_image_with_compression<C: ColorType, D: Compression>(
         &mut self,
         width: u32,
         height: u32,
@@ -132,7 +132,7 @@ impl<W: Write + Seek, K: TiffKind> TiffEncoder<W, K> {
     }
 
     /// Convenience function to write an entire image from memory with a given compression.
-    pub fn write_image_with_compression<C: ColorType, D: Compressor>(
+    pub fn write_image_with_compression<C: ColorType, D: Compression>(
         &mut self,
         width: u32,
         height: u32,
@@ -312,7 +312,7 @@ pub struct ImageEncoder<
     W: 'a + Write + Seek,
     C: ColorType,
     K: TiffKind,
-    D: Compressor = NoneCompressor,
+    D: Compression = Uncompressed,
 > {
     encoder: DirectoryEncoder<'a, W, K>,
     strip_idx: u64,
@@ -328,7 +328,7 @@ pub struct ImageEncoder<
     _phantom: ::std::marker::PhantomData<C>,
 }
 
-impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind, D: Compressor>
+impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind, D: Compression>
     ImageEncoder<'a, W, T, K, D>
 {
     fn new(encoder: DirectoryEncoder<'a, W, K>, width: u32, height: u32) -> TiffResult<Self>
@@ -431,15 +431,6 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind, D: Compressor>
     where
         [T::Inner]: TiffValue,
     {
-        if D::COMPRESSION_METHOD == tags::CompressionMethod::PackBits {
-            // Additional rule to PackBits compression:
-            // Pack each row separately. Do not compress across row boundaries
-            self.rows_per_strip = 1;
-            self.strip_count = u64::from(self.height);
-            self.encoder
-                .write_tag(Tag::RowsPerStrip, u32::try_from(self.rows_per_strip)?)?;
-        }
-
         let num_pix = usize::try_from(self.width)?
             .checked_mul(usize::try_from(self.height)?)
             .ok_or_else(|| {
@@ -538,7 +529,7 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind, D: Compressor>
     }
 }
 
-impl<'a, W: Write + Seek, C: ColorType, K: TiffKind, D: Compressor> Drop
+impl<'a, W: Write + Seek, C: ColorType, K: TiffKind, D: Compression> Drop
     for ImageEncoder<'a, W, C, K, D>
 {
     fn drop(&mut self) {

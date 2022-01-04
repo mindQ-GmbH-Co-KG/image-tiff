@@ -1,10 +1,14 @@
-use std::{convert::TryInto, io::prelude::*};
+use std::{
+    convert::TryInto,
+    io::{Seek, Write},
+};
 
 use crate::{
-    encoder::{compression::Compressor, ColorType, DirectoryEncoder, TiffKind, TiffValue},
-    error::TiffResult,
+    encoder::{
+        colortype::ColorType, compression::Compression, DirectoryEncoder, TiffKind, TiffValue,
+    },
     tags::CompressionMethod,
-    TiffError,
+    TiffResult,
 };
 
 /// Compressor that uses the Packbits[^note] algorithm to compress bytes.
@@ -13,9 +17,9 @@ use crate::{
 ///          including many grayscale images. In such cases, it is better
 ///          to leave the image uncompressed.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct PackbitsCompressor;
+pub struct Packbits;
 
-impl Compressor for PackbitsCompressor {
+impl Compression for Packbits {
     const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::PackBits;
 
     fn write_to<'a, T: ColorType, K: TiffKind, W: 'a + Write + Seek>(
@@ -57,7 +61,7 @@ impl Compressor for PackbitsCompressor {
 
         // Need at least one byte to compress
         if src_count == 0 {
-            return Err(TiffError::CompressionError);
+            return Ok((K::convert_offset(0)?, 0.try_into()?));
         }
 
         // Prime compressor with first character.
@@ -126,11 +130,6 @@ impl Compressor for PackbitsCompressor {
             encoder.write_data(&bytes[pending_index..pending_index + bytes_pending as usize])?;
         }
 
-        if offset.is_none() {
-            // should never be reached
-            return Err(TiffError::CompressionError);
-        }
-
         Ok((
             K::convert_offset(offset.unwrap())?,
             bytes_written.try_into()?,
@@ -140,16 +139,15 @@ impl Compressor for PackbitsCompressor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::encoder::compression::tests::{compress, TEST_DATA};
 
     #[test]
-    fn test_packbits_single() {
+    fn test_packbits_single_byte() {
         // compress single byte
         const UNCOMPRESSED_DATA: [u8; 1] = [0x3F];
         const EXPECTED_COMPRESSED_DATA: [u8; 2] = [0x00, 0x3F];
 
-        let compressed_data = compress(&UNCOMPRESSED_DATA, PackbitsCompressor::default());
+        let compressed_data = compress(&UNCOMPRESSED_DATA, super::Packbits::default());
         assert_eq!(compressed_data, EXPECTED_COMPRESSED_DATA);
     }
 
@@ -160,7 +158,7 @@ mod tests {
             b"This strrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrring hangs.";
         const EXPECTED_COMPRESSED_DATA: &'static [u8] = b"\x06This st\xD1r\x09ing hangs.";
 
-        let compressed_data = compress(UNCOMPRESSED_DATA, PackbitsCompressor::default());
+        let compressed_data = compress(UNCOMPRESSED_DATA, super::Packbits::default());
         assert_eq!(compressed_data, EXPECTED_COMPRESSED_DATA);
     }
 
@@ -192,17 +190,17 @@ mod tests {
             0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D,
         ];
 
-        let compressed_data = compress(data.as_slice(), PackbitsCompressor::default());
+        let compressed_data = compress(data.as_slice(), super::Packbits::default());
         assert_eq!(compressed_data, EXPECTED_COMPRESSED_DATA);
     }
 
     #[test]
-    fn test_packbits_string() {
+    fn test_packbits() {
         // compress teststring
         const EXPECTED_COMPRESSED_DATA: &'static [u8] =
             b"\x3CThis is a string for checking various compression algorithms.";
 
-        let compressed_data = compress(TEST_DATA, PackbitsCompressor::default());
+        let compressed_data = compress(TEST_DATA, super::Packbits::default());
         assert_eq!(compressed_data, EXPECTED_COMPRESSED_DATA);
     }
 }

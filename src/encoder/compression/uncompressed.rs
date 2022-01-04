@@ -1,16 +1,21 @@
-use std::{convert::TryInto, io::prelude::*};
-
-use crate::{
-    encoder::{compression::Compressor, ColorType, DirectoryEncoder, TiffKind, TiffValue},
-    error::TiffResult,
-    tags::CompressionMethod,
+use std::{
+    convert::TryInto,
+    io::{Seek, Write},
 };
 
-/// Compressor that does not compress any bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct NoneCompressor;
+use crate::{
+    encoder::{
+        colortype::ColorType, compression::Compression, DirectoryEncoder, TiffKind, TiffValue,
+    },
+    tags::CompressionMethod,
+    TiffResult,
+};
 
-impl Compressor for NoneCompressor {
+/// The default algorithm which does not compress at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Uncompressed;
+
+impl Compression for Uncompressed {
     const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::None;
 
     fn write_to<'a, T: ColorType, K: TiffKind, W: 'a + Write + Seek>(
@@ -29,12 +34,11 @@ impl Compressor for NoneCompressor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::encoder::compression::tests::{compress, TEST_DATA};
 
     #[test]
     fn test_no_compression() {
-        let compressed_data = compress(TEST_DATA, NoneCompressor::default());
-        assert_eq!(compressed_data, TEST_DATA);
+        let compressed_data = compress(TEST_DATA, super::Uncompressed);
+        assert_eq!(TEST_DATA, compressed_data);
     }
 }
