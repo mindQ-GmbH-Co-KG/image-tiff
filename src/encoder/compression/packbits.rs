@@ -30,11 +30,8 @@ impl Compression for Packbits {
     where
         [T::Inner]: TiffValue,
     {
-        let bytes = value.data();
-        let mut bytes_written = 0usize;
-        let mut offset: Option<u64> = None;
+        // Inspired by https://github.com/skirridsystems/packbits
 
-        // Port from https://github.com/skirridsystems/packbits
         const MIN_REPT: u8 = 3; // Minimum run to compress between differ blocks
         const MAX_BYTES: u8 = 128; // Maximum number of bytes that can be encoded in a header byte
 
@@ -47,10 +44,14 @@ impl Compression for Packbits {
             var as u8
         }
 
-        let mut src_index: usize = 0; // Index of the current byte
-        let mut src_count = bytes.len();
+        let bytes = value.data();
+        let mut bytes_written = 0usize; // The number of bytes written into the encoder
+        let mut offset: Option<u64> = None; // The index of the first byte written into the encoder
 
-        let mut in_run = false;
+        let mut src_index: usize = 0; // Index of the current byte
+        let mut src_count = bytes.len(); //The number of bytes remaining to be compressed
+
+        let mut in_run = false; // Indication whether counting of similar bytes is performed
         let mut run_index = 0u8; // Distance into pending bytes that a run starts
 
         let mut bytes_pending = 0u8; // Bytes looked at but not yet output
