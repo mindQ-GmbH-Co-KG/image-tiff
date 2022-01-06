@@ -1,5 +1,8 @@
 use crate::error::TiffResult;
+use crate::{encoder::compression::*, tags::CompressionMethod};
 use std::io::{self, Seek, SeekFrom, Write};
+
+use super::compression;
 
 pub fn write_tiff_header<W: Write>(writer: &mut TiffWriter<W>) -> TiffResult<()> {
     #[cfg(target_endian = "little")]
@@ -42,18 +45,39 @@ pub fn write_bigtiff_header<W: Write>(writer: &mut TiffWriter<W>) -> TiffResult<
 pub struct TiffWriter<W> {
     writer: W,
     offset: u64,
+    compressor: Box<dyn Compression>,
+    byte_count: u64,
 }
 
 impl<W: Write> TiffWriter<W> {
     pub fn new(writer: W) -> Self {
-        Self { writer, offset: 0 }
+        Self {
+            writer,
+            offset: 0,
+            compressor: Box::new(Uncompressed::default()),
+            byte_count: 0,
+        }
+    }
+
+    pub fn set_compression(&mut self, compression: CompressionMethod) {
+        self.compressor = get_compressor(compression);
+    }
+
+    pub fn reset_compression(&mut self) {
+        self.compressor = Box::new(Uncompressed);
     }
 
     pub fn offset(&self) -> u64 {
         self.offset
     }
 
+    pub fn byte_count(&self) -> u64 {
+        self.byte_count
+    }
+
     pub fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), io::Error> {
+        self.byte_count = self.compressor.write_to(self.writer, bytes);
+
         self.writer.write_all(bytes)?;
         self.offset += bytes.len() as u64;
         Ok(())

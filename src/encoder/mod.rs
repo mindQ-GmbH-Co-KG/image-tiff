@@ -274,6 +274,23 @@ impl<'a, W: Write + Seek, K: TiffKind> Drop for DirectoryEncoder<'a, W, K> {
     }
 }
 
+impl<'a, W: 'a + Write + Seek, K: TiffKind> std::io::Write for DirectoryEncoder<'a, W, K> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let res = self.write_data(buf);
+        match res {
+            Ok(val) => Ok(val as usize),
+            Err(err) => Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                err.to_string(),
+            )),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Type to encode images strip by strip.
 ///
 /// You should call `finish` on this when you are finished with it.
@@ -355,7 +372,7 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind, D: Compression>
 
         encoder.write_tag(Tag::ImageWidth, width)?;
         encoder.write_tag(Tag::ImageLength, height)?;
-        encoder.write_tag(Tag::Compression, D::COMPRESSION_METHOD.to_u16())?;
+        encoder.write_tag(Tag::Compression, compression.get_algorithm().to_u16())?;
 
         encoder.write_tag(Tag::BitsPerSample, <T>::BITS_PER_SAMPLE)?;
         let sample_format: Vec<_> = <T>::SAMPLE_FORMAT.iter().map(|s| s.to_u16()).collect();
@@ -416,11 +433,9 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind, D: Compression>
         }
 
         // Write the (possible compressed) data to the encoder.
-        let (offset, byte_count) = self
-            .compression
-            .write_to::<T, K, W>(&mut self.encoder, value)?;
-        self.strip_offsets.push(offset);
-        self.strip_byte_count.push(byte_count);
+        let offset = self.encoder.write_data(value)?;
+        self.strip_offsets.push(K::convert_offset(offset)?);
+        self.strip_byte_count.push(value.bytes().try_into()?);
 
         self.strip_idx += 1;
         Ok(())
@@ -446,12 +461,18 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind, D: Compression>
             )
             .into());
         }
+
+        self.encoder
+            .writer
+            .set_compression(self.compression.get_algorithm());
+
         let mut idx = 0;
         while self.next_strip_sample_count() > 0 {
             let sample_count = usize::try_from(self.next_strip_sample_count())?;
             self.write_strip(&data[idx..idx + sample_count])?;
             idx += sample_count;
         }
+        self.encoder.writer.reset_compression();
         self.finish()?;
         Ok(())
     }
