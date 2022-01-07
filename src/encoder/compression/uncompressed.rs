@@ -10,12 +10,17 @@ use std::io::Write;
 pub struct Uncompressed;
 
 impl Compression for Uncompressed {
-    fn get_algorithm(&self) -> CompressionMethod {
-        CompressionMethod::None
-    }
+    /// The corresponding tag to the algorithm.
+    const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::None;
 
-    fn write_to<W: Write>(&mut self, writer: &mut W, bytes: &[u8]) -> u64 {
-        writer.write(bytes).unwrap_or(0) as u64
+    fn get_algorithm(&self) -> Compressor {
+        Compressor::Uncompressed(*self)
+    }
+}
+
+impl CompressionAlgorithm for Uncompressed {
+    fn write_to<W: Write>(&mut self, writer: &mut W, bytes: &[u8]) -> Result<u64, io::Error> {
+        writer.write(bytes).map(|byte_count| byte_count as u64)
     }
 }
 
@@ -29,7 +34,9 @@ mod tests {
     fn test_no_compression() {
         let mut compressed_data = Vec::<u8>::new();
         let mut writer = Cursor::new(&mut compressed_data);
-        Uncompressed::default().write_to(&mut writer, TEST_DATA);
+        Uncompressed::default()
+            .write_to(&mut writer, TEST_DATA)
+            .unwrap();
         assert_eq!(TEST_DATA, compressed_data);
     }
 }

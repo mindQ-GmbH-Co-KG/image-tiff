@@ -372,7 +372,7 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind, D: Compression>
 
         encoder.write_tag(Tag::ImageWidth, width)?;
         encoder.write_tag(Tag::ImageLength, height)?;
-        encoder.write_tag(Tag::Compression, compression.get_algorithm().to_u16())?;
+        encoder.write_tag(Tag::Compression, D::COMPRESSION_METHOD.to_u16())?;
 
         encoder.write_tag(Tag::BitsPerSample, <T>::BITS_PER_SAMPLE)?;
         let sample_format: Vec<_> = <T>::SAMPLE_FORMAT.iter().map(|s| s.to_u16()).collect();
@@ -400,7 +400,7 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind, D: Compression>
             strip_offsets: Vec::new(),
             strip_byte_count: Vec::new(),
             dropped: false,
-            compression,
+            compression: compression,
             _phantom: ::std::marker::PhantomData,
         })
     }
@@ -434,8 +434,10 @@ impl<'a, W: 'a + Write + Seek, T: ColorType, K: TiffKind, D: Compression>
 
         // Write the (possible compressed) data to the encoder.
         let offset = self.encoder.write_data(value)?;
+        let byte_count = self.encoder.writer.byte_count() as usize;
+
         self.strip_offsets.push(K::convert_offset(offset)?);
-        self.strip_byte_count.push(value.bytes().try_into()?);
+        self.strip_byte_count.push(byte_count.try_into()?);
 
         self.strip_idx += 1;
         Ok(())

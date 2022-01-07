@@ -138,7 +138,7 @@ fn encode_decode_with_compression<C: Compression + Clone>(compression: C) {
 fn encode_decode_without_compression() {
     encode_decode_with_compression(Uncompressed::default());
 }
-/*
+
 #[test]
 fn encode_decode_with_lzw() {
     encode_decode_with_compression(Lzw::default());
@@ -155,4 +155,3 @@ fn encode_decode_with_deflate() {
 fn encode_decode_with_packbits() {
     encode_decode_with_compression(Packbits::default());
 }
-*/

@@ -1,35 +1,25 @@
-use std::{
-    convert::TryInto,
-    io::{Seek, Write},
-};
-
-use crate::{
-    encoder::{
-        colortype::ColorType, compression::Compression, DirectoryEncoder, TiffKind, TiffValue,
-    },
-    tags::CompressionMethod,
-    TiffResult,
-};
+use crate::{encoder::compression::*, tags::CompressionMethod};
+use std::io::{BufWriter, Error, ErrorKind, Write};
 
 /// Compressor that uses the Packbits[^note] algorithm to compress bytes.
 ///
 /// [^note]: PackBits is often ineffective on continuous tone images,
 ///          including many grayscale images. In such cases, it is better
 ///          to leave the image uncompressed.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct Packbits;
 
 impl Compression for Packbits {
+    /// The corresponding tag to the algorithm.
     const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::PackBits;
 
-    fn write_to<'a, T: ColorType, K: TiffKind, W: 'a + Write + Seek>(
-        &mut self,
-        encoder: &mut DirectoryEncoder<'a, W, K>,
-        value: &[T::Inner],
-    ) -> TiffResult<(K::OffsetType, K::OffsetType)>
-    where
-        [T::Inner]: TiffValue,
-    {
+    fn get_algorithm(&self) -> Compressor {
+        Compressor::Packbits(*self)
+    }
+}
+
+impl CompressionAlgorithm for Packbits {
+    fn write_to<W: Write>(&mut self, writer: &mut W, bytes: &[u8]) -> Result<u64, io::Error> {
         // Inspired by https://github.com/skirridsystems/packbits
 
         const MIN_REPT: u8 = 3; // Minimum run to compress between differ blocks
@@ -44,9 +34,13 @@ impl Compression for Packbits {
             var as u8
         }
 
-        let bytes = value.data();
-        let mut bytes_written = 0usize; // The number of bytes written into the encoder
-        let mut offset: Option<u64> = None; // The index of the first byte written into the encoder
+        fn write_u8<W: Write>(writer: &mut W, byte: u8) -> Result<u64, Error> {
+            writer.write(&[byte]).map(|byte_count| byte_count as u64)
+        }
+
+        let mut bufwriter = BufWriter::new(writer);
+        let mut bytes_written = 0u64; // The number of bytes written into the writer
+        let mut offset: Option<u64> = None; // The index of the first byte written into the writer
 
         let mut src_index: usize = 0; // Index of the current byte
         let mut src_count = bytes.len(); //The number of bytes remaining to be compressed
@@ -62,7 +56,7 @@ impl Compression for Packbits {
 
         // Need at least one byte to compress
         if src_count == 0 {
-            return Ok((K::convert_offset(0)?, 0.try_into()?));
+            return Err(Error::new(ErrorKind::WriteZero, "write zero"));
         }
 
         // Prime compressor with first character.
@@ -78,8 +72,8 @@ impl Compression for Packbits {
 
             if in_run {
                 if (curr_byte != last_byte) || (bytes_pending > MAX_BYTES) {
-                    offset.get_or_insert(encoder.write_data(encode_rept(bytes_pending - 1))?);
-                    encoder.write_data(last_byte)?;
+                    offset.get_or_insert(write_u8(&mut bufwriter, encode_rept(bytes_pending - 1))?);
+                    write_u8(&mut bufwriter, last_byte)?;
                     bytes_written += 2;
 
                     bytes_pending = 1;
@@ -91,10 +85,9 @@ impl Compression for Packbits {
                 if bytes_pending > MAX_BYTES {
                     // We have as much differing data as we can output in one chunk.
                     // Output MAX_BYTES leaving one byte.
-                    offset.get_or_insert(encoder.write_data(encode_diff(MAX_BYTES))?);
-                    encoder
-                        .write_data(&bytes[pending_index..pending_index + MAX_BYTES as usize])?;
-                    bytes_written += 1 + MAX_BYTES as usize;
+                    offset.get_or_insert(write_u8(&mut bufwriter, encode_diff(MAX_BYTES))?);
+                    bufwriter.write(&bytes[pending_index..pending_index + MAX_BYTES as usize])?;
+                    bytes_written += 1 + MAX_BYTES as u64;
 
                     pending_index += MAX_BYTES as usize;
                     bytes_pending -= MAX_BYTES;
@@ -104,11 +97,10 @@ impl Compression for Packbits {
                         // This is a worthwhile run
                         if run_index != 0 {
                             // Flush differing data out of input buffer
-                            offset.get_or_insert(encoder.write_data(encode_diff(run_index))?);
-                            encoder.write_data(
-                                &bytes[pending_index..pending_index + run_index as usize],
-                            )?;
-                            bytes_written += 1 + run_index as usize;
+                            offset.get_or_insert(write_u8(&mut bufwriter, encode_diff(run_index))?);
+                            bufwriter
+                                .write(&bytes[pending_index..pending_index + run_index as usize])?;
+                            bytes_written += 1 + run_index as u64;
                         }
                         bytes_pending -= run_index; // Length of run
                         in_run = true;
@@ -123,24 +115,23 @@ impl Compression for Packbits {
         // Output the remainder
         if in_run {
             bytes_written += 2;
-            offset.get_or_insert(encoder.write_data(encode_rept(bytes_pending))?);
-            encoder.write_data(last_byte)?;
+            offset.get_or_insert(write_u8(&mut bufwriter, encode_rept(bytes_pending))?);
+            write_u8(&mut bufwriter, last_byte)?;
         } else {
-            bytes_written += 1 + bytes_pending as usize;
-            offset.get_or_insert(encoder.write_data(encode_diff(bytes_pending))?);
-            encoder.write_data(&bytes[pending_index..pending_index + bytes_pending as usize])?;
+            bytes_written += 1 + bytes_pending as u64;
+            offset.get_or_insert(write_u8(&mut bufwriter, encode_diff(bytes_pending))?);
+            bufwriter.write(&bytes[pending_index..pending_index + bytes_pending as usize])?;
         }
 
-        Ok((
-            K::convert_offset(offset.unwrap())?,
-            bytes_written.try_into()?,
-        ))
+        Ok(bytes_written)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::encoder::compression::tests::{compress, TEST_DATA};
+    use super::*;
+    use crate::encoder::compression::tests::TEST_DATA;
+    use std::io::Cursor;
 
     #[test]
     fn test_packbits_single_byte() {
@@ -148,7 +139,11 @@ mod tests {
         const UNCOMPRESSED_DATA: [u8; 1] = [0x3F];
         const EXPECTED_COMPRESSED_DATA: [u8; 2] = [0x00, 0x3F];
 
-        let compressed_data = compress(&UNCOMPRESSED_DATA, super::Packbits::default());
+        let mut compressed_data = Vec::<u8>::new();
+        let mut writer = Cursor::new(&mut compressed_data);
+        Packbits::default()
+            .write_to(&mut writer, &UNCOMPRESSED_DATA)
+            .unwrap();
         assert_eq!(compressed_data, EXPECTED_COMPRESSED_DATA);
     }
 
@@ -159,7 +154,11 @@ mod tests {
             b"This strrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrring hangs.";
         const EXPECTED_COMPRESSED_DATA: &'static [u8] = b"\x06This st\xD1r\x09ing hangs.";
 
-        let compressed_data = compress(UNCOMPRESSED_DATA, super::Packbits::default());
+        let mut compressed_data = Vec::<u8>::new();
+        let mut writer = Cursor::new(&mut compressed_data);
+        Packbits::default()
+            .write_to(&mut writer, &UNCOMPRESSED_DATA)
+            .unwrap();
         assert_eq!(compressed_data, EXPECTED_COMPRESSED_DATA);
     }
 
@@ -191,7 +190,11 @@ mod tests {
             0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D,
         ];
 
-        let compressed_data = compress(data.as_slice(), super::Packbits::default());
+        let mut compressed_data = Vec::<u8>::new();
+        let mut writer = Cursor::new(&mut compressed_data);
+        Packbits::default()
+            .write_to(&mut writer, data.as_slice())
+            .unwrap();
         assert_eq!(compressed_data, EXPECTED_COMPRESSED_DATA);
     }
 
@@ -201,7 +204,11 @@ mod tests {
         const EXPECTED_COMPRESSED_DATA: &'static [u8] =
             b"\x3CThis is a string for checking various compression algorithms.";
 
-        let compressed_data = compress(TEST_DATA, super::Packbits::default());
+        let mut compressed_data = Vec::<u8>::new();
+        let mut writer = Cursor::new(&mut compressed_data);
+        Packbits::default()
+            .write_to(&mut writer, &TEST_DATA)
+            .unwrap();
         assert_eq!(compressed_data, EXPECTED_COMPRESSED_DATA);
     }
 }
