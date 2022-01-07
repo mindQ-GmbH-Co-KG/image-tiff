@@ -11,17 +11,19 @@ pub use self::lzw::Lzw;
 pub use self::packbits::Packbits;
 pub use self::uncompressed::Uncompressed;
 
-/// An algorithm used for compression with associated optional buffers and/or configurations.
+/// An algorithm used for compression
 pub trait CompressionAlgorithm {
     fn write_to<W: Write>(&mut self, writer: &mut W, bytes: &[u8]) -> Result<u64, io::Error>;
 }
 
+/// An algorithm used for compression with associated enums and optional configurations.
 pub trait Compression: CompressionAlgorithm {
     /// The corresponding tag to the algorithm.
     const COMPRESSION_METHOD: CompressionMethod;
     fn get_algorithm(&self) -> Compressor;
 }
 
+/// An enum to store each compression algorithm.
 pub enum Compressor {
     Uncompressed(Uncompressed),
     Lzw(Lzw),

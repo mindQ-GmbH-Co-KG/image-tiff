@@ -56,8 +56,7 @@ impl CompressionAlgorithm for Deflate {
         let mut encoder = ZlibEncoder::new(writer, self.level);
         encoder.write(&bytes)?;
         encoder.try_finish()?;
-        let byte_count = encoder.total_out();
-        Ok(byte_count)
+        Ok(encoder.total_out())
     }
 }
 
