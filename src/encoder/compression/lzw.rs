@@ -7,7 +7,6 @@ use weezl::encode::Encoder as LZWEncoder;
 pub struct Lzw;
 
 impl Compression for Lzw {
-    /// The corresponding tag to the algorithm.
     const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::LZW;
 
     fn get_algorithm(&self) -> Compressor {

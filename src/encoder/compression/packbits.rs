@@ -10,7 +10,6 @@ use std::io::{BufWriter, Error, ErrorKind, Write};
 pub struct Packbits;
 
 impl Compression for Packbits {
-    /// The corresponding tag to the algorithm.
     const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::PackBits;
 
     fn get_algorithm(&self) -> Compressor {

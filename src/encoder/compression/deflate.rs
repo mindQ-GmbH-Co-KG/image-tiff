@@ -28,7 +28,7 @@ impl Default for DeflateLevel {
 }
 
 impl Deflate {
-    /// Create a new deflate compr+essor with a specific level of compression.
+    /// Create a new deflate compressor with a specific level of compression.
     pub fn with_level(level: DeflateLevel) -> Self {
         Self {
             level: FlateCompression::new(level as u32),
@@ -43,7 +43,6 @@ impl Default for Deflate {
 }
 
 impl Compression for Deflate {
-    /// The corresponding tag to the algorithm.
     const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::Deflate;
 
     fn get_algorithm(&self) -> Compressor {

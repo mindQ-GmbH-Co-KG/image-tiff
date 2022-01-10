@@ -13,6 +13,8 @@ pub use self::uncompressed::Uncompressed;
 
 /// An algorithm used for compression
 pub trait CompressionAlgorithm {
+    /// The algorithm writes data directly into the writer.
+    /// It returns the total number of bytes written.
     fn write_to<W: Write>(&mut self, writer: &mut W, bytes: &[u8]) -> Result<u64, io::Error>;
 }
 
@@ -20,6 +22,8 @@ pub trait CompressionAlgorithm {
 pub trait Compression: CompressionAlgorithm {
     /// The corresponding tag to the algorithm.
     const COMPRESSION_METHOD: CompressionMethod;
+
+    /// Method to optain a type that can store each variant of comression algorithm.
     fn get_algorithm(&self) -> Compressor;
 }
 
@@ -32,6 +36,7 @@ pub enum Compressor {
 }
 
 impl Default for Compressor {
+    /// The default compression strategy does not apply any compression.
     fn default() -> Self {
         Compressor::Uncompressed(Uncompressed::default())
     }

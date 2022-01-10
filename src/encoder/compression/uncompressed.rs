@@ -1,16 +1,11 @@
 use crate::{encoder::compression::*, tags::CompressionMethod};
 use std::io::Write;
 
-//
-// TiffValue -> Tiffwriter -> Write = Compression -> Write = DirectoryEncoder
-//
-
 /// The default algorithm which does not compress at all.
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Uncompressed;
 
 impl Compression for Uncompressed {
-    /// The corresponding tag to the algorithm.
     const COMPRESSION_METHOD: CompressionMethod = CompressionMethod::None;
 
     fn get_algorithm(&self) -> Compressor {
