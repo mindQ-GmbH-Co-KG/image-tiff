@@ -3,7 +3,7 @@ use std::io::Write;
 use weezl::encode::Encoder as LZWEncoder;
 
 /// The LZW algorithm used to compress image data in TIFF files.
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Lzw;
 
 impl Compression for Lzw {

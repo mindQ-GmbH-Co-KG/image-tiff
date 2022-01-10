@@ -3,7 +3,7 @@ use flate2::{write::ZlibEncoder, Compression as FlateCompression};
 use std::io::Write;
 
 /// The Deflate algorithm used to compress image data in TIFF files.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Deflate {
     level: FlateCompression,
 }

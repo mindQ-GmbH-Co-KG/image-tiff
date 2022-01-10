@@ -279,23 +279,6 @@ impl<'a, W: Write + Seek, K: TiffKind> Drop for DirectoryEncoder<'a, W, K> {
     }
 }
 
-impl<'a, W: 'a + Write + Seek, K: TiffKind> std::io::Write for DirectoryEncoder<'a, W, K> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let res = self.write_data(buf);
-        match res {
-            Ok(val) => Ok(val as usize),
-            Err(err) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                err.to_string(),
-            )),
-        }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 /// Type to encode images strip by strip.
 ///
 /// You should call `finish` on this when you are finished with it.

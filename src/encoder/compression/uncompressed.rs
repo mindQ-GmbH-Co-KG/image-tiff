@@ -2,7 +2,7 @@ use crate::{encoder::compression::*, tags::CompressionMethod};
 use std::io::Write;
 
 /// The default algorithm which does not compress at all.
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Uncompressed;
 
 impl Compression for Uncompressed {

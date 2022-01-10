@@ -6,7 +6,7 @@ use std::io::{BufWriter, Error, ErrorKind, Write};
 /// [^note]: PackBits is often ineffective on continuous tone images,
 ///          including many grayscale images. In such cases, it is better
 ///          to leave the image uncompressed.
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Packbits;
 
 impl Compression for Packbits {

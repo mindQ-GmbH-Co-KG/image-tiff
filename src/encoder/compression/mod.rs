@@ -5,8 +5,8 @@ mod deflate;
 mod lzw;
 mod packbits;
 mod uncompressed;
-pub use self::deflate::Deflate;
-pub use self::deflate::DeflateLevel;
+
+pub use self::deflate::{Deflate, DeflateLevel};
 pub use self::lzw::Lzw;
 pub use self::packbits::Packbits;
 pub use self::uncompressed::Uncompressed;

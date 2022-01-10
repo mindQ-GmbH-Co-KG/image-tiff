@@ -2,8 +2,6 @@ use crate::encoder::compression::*;
 use crate::error::TiffResult;
 use std::io::{self, Seek, SeekFrom, Write};
 
-use super::compression::Compressor;
-
 pub fn write_tiff_header<W: Write>(writer: &mut TiffWriter<W>) -> TiffResult<()> {
     #[cfg(target_endian = "little")]
     let boi: u8 = 0x49;
@@ -54,8 +52,8 @@ impl<W: Write> TiffWriter<W> {
         Self {
             writer,
             offset: 0,
-            compressor: Compressor::default(),
             byte_count: 0,
+            compressor: Compressor::default(),
         }
     }
 
